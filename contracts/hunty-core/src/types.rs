@@ -4,6 +4,11 @@ use soroban_sdk::{contracttype, Address, BytesN, Env, Map, String, Vec};
 /// Bounds the size of the co-creator list so it cannot grow without limit.
 pub const MAX_CO_CREATORS: u32 = 10;
 
+/// Lowest supported initial score multiplier. 10_000 basis points is 1x.
+pub const MIN_START_MULTIPLIER_BPS: u32 = 10_000;
+/// Highest supported initial score multiplier. 50_000 basis points is 5x.
+pub const MAX_START_MULTIPLIER_BPS: u32 = 50_000;
+
 #[contracttype]
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[repr(u32)]
@@ -796,7 +801,8 @@ impl TimeBonusConfig {
     pub fn is_valid(&self) -> bool {
         self.decay_duration_secs > 0
             && self.start_multiplier_bps >= self.min_multiplier_bps
-            && self.min_multiplier_bps >= 10_000
+            && self.min_multiplier_bps >= MIN_START_MULTIPLIER_BPS
+            && self.start_multiplier_bps <= MAX_START_MULTIPLIER_BPS
     }
 
     pub fn multiplier_bps_at(&self, elapsed_secs: u64) -> u32 {
@@ -963,4 +969,47 @@ pub struct ViewOnlyAccessRevokedEvent {
     pub hunt_id: u64,
     pub actor: Address,
     pub viewer: Address,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_time_bonus_config_validation_caps_start_multiplier() {
+        // Valid config within bounds
+        let valid_config = TimeBonusConfig {
+            start_multiplier_bps: MAX_START_MULTIPLIER_BPS,
+            min_multiplier_bps: MIN_START_MULTIPLIER_BPS,
+            decay_duration_secs: 3600,
+        };
+        assert!(valid_config.is_valid());
+
+        // Invalid config: start_multiplier_bps exceeds MAX_START_MULTIPLIER_BPS
+        let invalid_config = TimeBonusConfig {
+            start_multiplier_bps: MAX_START_MULTIPLIER_BPS + 1,
+            min_multiplier_bps: MIN_START_MULTIPLIER_BPS,
+            decay_duration_secs: 3600,
+        };
+        assert!(!invalid_config.is_valid());
+
+        // Invalid config: start_multiplier_bps at u32::MAX would cause saturation
+        let saturating_config = TimeBonusConfig {
+            start_multiplier_bps: u32::MAX,
+            min_multiplier_bps: MIN_START_MULTIPLIER_BPS,
+            decay_duration_secs: 3600,
+        };
+        assert!(!saturating_config.is_valid());
+    }
+
+    #[test]
+    fn test_time_bonus_config_validation_enforces_min_bounds() {
+        // Invalid: min_multiplier_bps below MIN_START_MULTIPLIER_BPS
+        let invalid_min = TimeBonusConfig {
+            start_multiplier_bps: 20_000,
+            min_multiplier_bps: MIN_START_MULTIPLIER_BPS - 1,
+            decay_duration_secs: 3600,
+        };
+        assert!(!invalid_min.is_valid());
+    }
 }
